@@ -1,0 +1,5 @@
+{
+  "name": "LeakFeed",
+  "description": "Real-time global data breach map visualizing recent corporate data leaks.",
+  "requestFramePermissions": []
+}
