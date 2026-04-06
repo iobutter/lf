@@ -4,7 +4,7 @@ async function run() {
       headers: { "X-API-KEY": "a72505f5-af2c-4b8b-95be-b28674f7ef72" }
     });
     const data = await res.json();
-    console.log(JSON.stringify(data[0], null, 2));
+    console.log(JSON.stringify(data).substring(0, 500));
   } catch (e) {
     console.error(e.message);
   }

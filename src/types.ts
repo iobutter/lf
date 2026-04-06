@@ -23,6 +23,13 @@ export interface Victim {
   exfiltrated_data?: string;
   attack_date?: string;
   activity?: string;
+  
+  // Dynamically added properties
+  id?: string;
+  severity?: number;
+  isRecent?: boolean;
+  isTop2?: boolean;
+  coordinates?: [number, number];
 }
 
 export interface CountryCoords {

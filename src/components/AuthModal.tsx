@@ -40,6 +40,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
 
       localStorage.setItem('leakfeed_token', 'dummy-token-for-key');
       localStorage.setItem('leakfeed_user', JSON.stringify(user));
+      window.dispatchEvent(new Event('auth-change'));
       onSuccess(user);
       setLoading(false);
       onClose();

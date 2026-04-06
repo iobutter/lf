@@ -124,6 +124,50 @@ async function startServer() {
     }
   });
 
+  app.get("/api/negotiations/:group", async (req, res) => {
+    try {
+      const apiKey = process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72";
+      const { group } = req.params;
+      
+      const response = await axios.get(`https://api-pro.ransomware.live/negotiations/${group}`, {
+        headers: {
+          "X-API-KEY": apiKey,
+          "Accept": "application/json"
+        },
+        timeout: 10000,
+      });
+      
+      res.json(response.data);
+    } catch (error: any) {
+      console.error(`Negotiations group error (${req.params.group}):`, error.message);
+      res.status(error.response?.status || 500).json({ 
+        error: "Negotiations group data unavailable" 
+      });
+    }
+  });
+
+  app.get("/api/negotiations/:group/:id", async (req, res) => {
+    try {
+      const apiKey = process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72";
+      const { group, id } = req.params;
+      
+      const response = await axios.get(`https://api-pro.ransomware.live/negotiations/${group}/${id}`, {
+        headers: {
+          "X-API-KEY": apiKey,
+          "Accept": "application/json"
+        },
+        timeout: 10000,
+      });
+      
+      res.json(response.data);
+    } catch (error: any) {
+      console.error(`Negotiations chat error (${req.params.group}/${req.params.id}):`, error.message);
+      res.status(error.response?.status || 500).json({ 
+        error: "Negotiations chat data unavailable" 
+      });
+    }
+  });
+
   // Global Stats Proxy
   app.get("/api/stats", async (req, res) => {
     try {

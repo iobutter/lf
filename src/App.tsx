@@ -2,13 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react';
 import TopBar from './components/TopBar';
 import { GoogleGenAI } from "@google/genai";
 import Markdown from "react-markdown";
-import {
-  ComposableMap,
-  Geographies,
-  Geography,
-  Marker,
-  Sphere
-} from 'react-simple-maps';
+import CobeGlobe from './components/CobeGlobe';
 import { motion, AnimatePresence, useScroll, useTransform, useSpring } from 'motion/react';
 import { 
   AlertTriangle, 
@@ -34,7 +28,8 @@ import {
   Terminal,
   Cpu,
   Plus,
-  Minus
+  Minus,
+  MessageSquare
 } from 'lucide-react';
 import React from 'react';
 import { clsx, type ClassValue } from 'clsx';
@@ -99,7 +94,30 @@ export default function App() {
   const [newBreach, setNewBreach] = useState<Victim | null>(null);
   const [newsContent, setNewsContent] = useState<string>('');
   const [isFetchingNews, setIsFetchingNews] = useState(false);
+  
+  // Chat & Premium State
+  const [selectedChatGroup, setSelectedChatGroup] = useState<string | null>(null);
+  const [groupChats, setGroupChats] = useState<any[]>([]);
+  const [loadingChats, setLoadingChats] = useState(false);
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [isPremium, setIsPremium] = useState(false);
   const lastVictimId = useRef<string | null>(null);
+
+  useEffect(() => {
+    const checkPremium = () => {
+      const token = localStorage.getItem('leakfeed_token');
+      setIsPremium(!!token);
+    };
+    checkPremium();
+    window.addEventListener('storage', checkPremium);
+    window.addEventListener('auth-change', checkPremium);
+    return () => {
+      window.removeEventListener('storage', checkPremium);
+      window.removeEventListener('auth-change', checkPremium);
+    };
+  }, []);
   
   const [expandedOnions, setExpandedOnions] = useState(false);
   const [expandedTTPs, setExpandedTTPs] = useState(false);
@@ -128,32 +146,6 @@ export default function App() {
     }
   }, [timelineRange]);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    isDragging.current = true;
-    lastPos.current = { x: e.clientX, y: e.clientY };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (isDragging.current) {
-      const dx = e.clientX - lastPos.current.x;
-      const dy = e.clientY - lastPos.current.y;
-      
-      const sensitivity = 0.25 / zoom;
-      
-      // Use requestAnimationFrame to throttle rotation updates
-      requestAnimationFrame(() => {
-        if (!isDragging.current) return;
-        setRotation(prev => [
-          prev[0] + dx * sensitivity,
-          prev[1] - dy * sensitivity,
-          prev[2]
-        ]);
-      });
-      lastPos.current = { x: e.clientX, y: e.clientY };
-    }
-    mousePosRef.current = { x: e.clientX, y: e.clientY };
-  };
-
   const fetchGroupIntel = async (groupName: string) => {
     if (!groupName || groupName === "Classified") return;
     setLoadingGroup(true);
@@ -172,10 +164,6 @@ export default function App() {
     } finally {
       setLoadingGroup(false);
     }
-  };
-
-  const handleMouseUp = () => {
-    isDragging.current = false;
   };
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -296,7 +284,8 @@ export default function App() {
       const response = await fetch('/api/negotiations');
       if (response.ok) {
         const data = await response.json();
-        setNegotiations(data.groups || []);
+        console.log("Negotiations data:", data);
+        setNegotiations(Array.isArray(data) ? data : data.groups || []);
       }
     } catch (err) {
       console.error("Failed to fetch negotiations:", err);
@@ -371,6 +360,42 @@ export default function App() {
     const sortedByDate = [...victims].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return sortedByDate.slice(0, 2).map(v => v.id || `${v.victim}-${v.date}`);
   }, [victims]);
+
+  const fetchGroupChats = async (groupName: string) => {
+    try {
+      setLoadingChats(true);
+      setSelectedChatGroup(groupName);
+      setSelectedChatId(null);
+      setChatMessages([]);
+      
+      const res = await fetch(`/api/negotiations/${groupName}`);
+      if (res.ok) {
+        const data = await res.json();
+        setGroupChats(data.chats || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch group chats:", err);
+    } finally {
+      setLoadingChats(false);
+    }
+  };
+
+  const fetchChatMessages = async (groupName: string, chatId: string) => {
+    try {
+      setLoadingMessages(true);
+      setSelectedChatId(chatId);
+      
+      const res = await fetch(`/api/negotiations/${groupName}/${chatId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setChatMessages(data.messages || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch chat messages:", err);
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
 
   const markers = useMemo(() => {
     if (!Array.isArray(victims) || victims.length === 0) return [];
@@ -473,48 +498,6 @@ export default function App() {
     if (severity === 2) return finalSize * 0.85;
     return finalSize * 0.7;
   };
-
-  const memoizedGeographies = useMemo(() => (
-    <Geographies geography={geoUrl}>
-      {({ geographies }) =>
-        geographies.map((geo) => (
-          <Geography
-            key={geo.rsmKey}
-            geography={geo}
-            fill="#0a0a0a"
-            stroke="#1a1a1a"
-            strokeWidth={0.5}
-            style={{
-              default: { outline: "none" },
-              hover: { fill: "#111", outline: "none" },
-              pressed: { fill: "#1a1a1a", outline: "none" },
-            }}
-          />
-        ))
-      }
-    </Geographies>
-  ), []);
-
-  const handleMarkerMouseEnter = useCallback((marker: any) => {
-    setHoveredVictim(marker);
-  }, []);
-
-  const handleMarkerMouseLeave = useCallback(() => {
-    setHoveredVictim(null);
-  }, []);
-
-  const handleMarkerClick = useCallback((marker: any) => {
-    setSelectedVictim(marker);
-    setPopupPos({ 
-      x: Math.min(window.innerWidth - 380, Math.max(20, mousePosRef.current.x + 20)), 
-      y: Math.min(window.innerHeight - 450, Math.max(100, mousePosRef.current.y - 200)) 
-    });
-    const countryCode = (marker.country || '').toUpperCase();
-    const coords = COUNTRY_COORDINATES[countryCode];
-    if (coords) {
-      rotateTo(coords[0], coords[1], marker.date);
-    }
-  }, [rotateTo]);
 
   if (view === 'home') {
     return (
@@ -747,47 +730,15 @@ export default function App() {
 
       {/* Map Container */}
       <div 
-        className="w-full h-full relative z-10 cursor-grab active:cursor-grabbing overflow-hidden"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        className="w-full h-full relative z-10 overflow-hidden"
         onWheel={handleWheel}
       >
-        <ComposableMap
-          projection="geoOrthographic"
-          projectionConfig={{ 
-            scale: 280 * zoom,
-            rotate: rotation
-          }}
-          className="w-full h-full"
-        >
-          <Sphere fill="#080b14" stroke="#1a1a1a" strokeWidth={0.5} />
-          {memoizedGeographies}
-
-          <AnimatePresence>
-            {markers.map((marker: any) => {
-              // Check if marker is on the visible side of the globe
-              if (!isPointVisible(marker.coordinates[0], marker.coordinates[1], rotation)) return null;
-
-              const color = getSeverityColor(marker.severity, marker.isRecent, marker.isTop2);
-              const size = getSeveritySize(marker.severity, marker.isRecent, marker.isTop2);
-
-              return (
-                <MemoizedMarker 
-                  key={marker.id}
-                  marker={marker}
-                  color={color}
-                  size={size}
-                  zoom={zoom}
-                  onMouseEnter={handleMarkerMouseEnter}
-                  onMouseLeave={handleMarkerMouseLeave}
-                  onClick={handleMarkerClick}
-                />
-              );
-            })}
-          </AnimatePresence>
-        </ComposableMap>
+        <CobeGlobe 
+          markers={markers} 
+          rotation={rotation} 
+          zoom={zoom} 
+          onRotationChange={setRotation} 
+        />
       </div>
 
       {/* Latest Breaches Sidebar */}
@@ -948,7 +899,8 @@ export default function App() {
                         initial={{ opacity: 0, x: 20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: i * 0.05 }}
-                        className="bg-white/5 border border-white/5 rounded-xl p-4 hover:bg-white/10 transition-all duration-300"
+                        className="bg-white/5 border border-white/5 rounded-xl p-4 hover:bg-white/10 transition-all duration-300 cursor-pointer"
+                        onClick={() => fetchGroupChats(n.group)}
                       >
                         <div className="flex justify-between items-center mb-2">
                           <h4 className="text-sm font-bold text-white">{n.group}</h4>
@@ -1186,13 +1138,15 @@ export default function App() {
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="fixed z-40 bg-[#050505]/98 backdrop-blur-3xl border border-white/10 rounded-2xl shadow-[0_40px_120px_rgba(0,0,0,0.9)] p-6 w-[360px] pointer-events-auto cursor-default active:cursor-grabbing"
+            className="fixed z-40 flex gap-4 pointer-events-auto cursor-default"
             style={{
               left: popupPos.x,
               top: popupPos.y,
             }}
           >
-            <div className="flex justify-between items-start mb-5 cursor-grab active:cursor-grabbing">
+            {/* Main Victim Info */}
+            <div className="bg-[#050505]/98 backdrop-blur-3xl border border-white/10 rounded-2xl shadow-[0_40px_120px_rgba(0,0,0,0.9)] p-6 w-[360px] active:cursor-grabbing">
+              <div className="flex justify-between items-start mb-5 cursor-grab active:cursor-grabbing">
               <div className="flex items-center gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-red-600 animate-pulse" />
                 <span className="text-[10px] font-black uppercase tracking-[0.2em] text-red-500">Data Leak</span>
@@ -1309,17 +1263,29 @@ export default function App() {
               </div>
               <div className="flex flex-col">
                 <span className="text-[10px] text-zinc-600 uppercase tracking-widest mb-1">Negotiation Status</span>
-                <span className="text-[10px] font-bold text-zinc-400">
-                  {(() => {
-                    const groupName = (selectedVictim.ransomware_group || selectedVictim.group)?.toLowerCase();
-                    const groupNegotiations = negotiations.find(n => n.group?.toLowerCase() === groupName);
-                    return groupNegotiations ? `${groupNegotiations.chats} Active Chats` : "No Active Chat";
-                  })()}
-                </span>
+                {(() => {
+                  const groupName = (selectedVictim.ransomware_group || selectedVictim.group)?.toLowerCase();
+                  const groupNegotiations = negotiations.find(n => n.group?.toLowerCase() === groupName);
+                  return groupNegotiations ? (
+                    <button 
+                      onClick={() => fetchGroupChats(groupNegotiations.group)}
+                      className="text-[10px] font-bold text-blue-400 hover:text-blue-300 text-left underline decoration-blue-500/30 underline-offset-4"
+                    >
+                      {groupNegotiations.chats} Active Chats
+                    </button>
+                  ) : (
+                    <span className="text-[10px] font-bold text-zinc-400">No Active Chat</span>
+                  );
+                })()}
               </div>
             </div>
+            </div>
 
-            <div className="flex flex-col gap-2">
+            {/* Victim Side Panel (Actions & Intel) */}
+            <div className="w-80 flex flex-col gap-4">
+              <div className="bg-[#050505]/98 backdrop-blur-3xl border border-white/10 p-4 rounded-2xl shadow-2xl flex flex-col gap-2">
+              <h4 className="text-[10px] text-zinc-500 uppercase tracking-widest font-black mb-2">Actions</h4>
+              
               {(selectedVictim.url || selectedVictim.website) && (
                 <a 
                   href={sanitizeUrl(selectedVictim.url || selectedVictim.website)}
@@ -1331,19 +1297,43 @@ export default function App() {
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               )}
-              {selectedVictim.post_url && (
-                <a 
-                  href={sanitizeUrl(selectedVictim.post_url)}
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="w-full py-2.5 bg-zinc-900 border border-white/10 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-zinc-800 transition-all hover:scale-[1.02] active:scale-95"
-                >
-                  View Onion Post
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
               
-              <div className="mt-2 p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl">
+              {selectedVictim.post_url && (
+                <div className="relative group">
+                  <a 
+                    href={isPremium ? sanitizeUrl(selectedVictim.post_url) : "#"}
+                    target={isPremium ? "_blank" : undefined}
+                    rel={isPremium ? "noopener noreferrer" : undefined}
+                    onClick={(e) => {
+                      if (!isPremium) {
+                        e.preventDefault();
+                        // Could trigger a premium modal here
+                      }
+                    }}
+                    className={cn(
+                      "w-full py-2.5 border border-white/10 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all",
+                      isPremium 
+                        ? "bg-zinc-900 hover:bg-zinc-800 hover:scale-[1.02] active:scale-95" 
+                        : "bg-zinc-900/50 blur-[1px] cursor-not-allowed"
+                    )}
+                  >
+                    Download Data
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                  {!isPremium && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <span className="bg-black/80 text-white px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest border border-white/10 shadow-xl">
+                        Premium Required
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            
+            <div className="bg-black/80 backdrop-blur-3xl border border-white/10 p-4 rounded-2xl shadow-2xl">
+              <h4 className="text-[10px] text-zinc-500 uppercase tracking-widest font-black mb-3">Breach Intelligence</h4>
+              <div className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl">
                 {newsContent ? (
                   <div className="prose prose-invert prose-sm text-[11px] leading-relaxed max-w-none prose-a:text-blue-400 hover:prose-a:text-blue-300 prose-p:my-1 prose-ul:my-1 prose-li:my-0">
                     <Markdown>{newsContent}</Markdown>
@@ -1357,11 +1347,132 @@ export default function App() {
                     onClick={() => fetchInlineFacts(selectedVictim)}
                     className="w-full py-2 bg-blue-600/20 border border-blue-500/30 text-blue-400 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-blue-600/30 transition-all hover:scale-[1.02] active:scale-95"
                   >
-                    Breach Details
+                    Analyze Breach
                     <Search className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
+            </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Chat Popup */}
+      <AnimatePresence>
+        {selectedChatGroup && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] max-w-[90vw] h-[600px] max-h-[80vh] z-50 pointer-events-auto flex bg-black/90 backdrop-blur-3xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+          >
+            {/* Chat List Sidebar */}
+            <div className="w-1/3 border-r border-white/10 flex flex-col bg-zinc-900/50">
+              <div className="p-4 border-b border-white/10 flex justify-between items-center bg-black/50">
+                <h3 className="text-sm font-black text-white uppercase tracking-widest">{selectedChatGroup} Chats</h3>
+                <button 
+                  onClick={() => setSelectedChatGroup(null)}
+                  className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-all"
+                >
+                  <X className="w-4 h-4 text-zinc-400" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
+                {loadingChats ? (
+                  <div className="flex items-center justify-center h-full text-blue-400 text-[10px] uppercase tracking-widest">
+                    <RefreshCw className="w-4 h-4 animate-spin mr-2" /> Loading...
+                  </div>
+                ) : groupChats.length > 0 ? (
+                  <div className="flex flex-col gap-1">
+                    {groupChats.map((chat: any, i: number) => (
+                      <button
+                        key={i}
+                        onClick={() => fetchChatMessages(selectedChatGroup, chat.id || chat.chat_id)}
+                        className={cn(
+                          "p-3 rounded-xl text-left transition-all border",
+                          selectedChatId === (chat.id || chat.chat_id) 
+                            ? "bg-blue-600/20 border-blue-500/30" 
+                            : "bg-white/5 border-transparent hover:bg-white/10"
+                        )}
+                      >
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-xs font-bold text-white">{chat.id || chat.chat_id}</span>
+                          {chat.paid && <span className="px-1.5 py-0.5 bg-red-500/20 text-red-400 text-[9px] font-black uppercase rounded">Paid</span>}
+                        </div>
+                        <div className="flex justify-between items-center text-[10px] text-zinc-400">
+                          <span>{chat.message_count || 0} msgs</span>
+                          <span>{chat.negotiatedransom !== "N/A" ? chat.negotiatedransom : chat.initialransom}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-zinc-500 text-xs">
+                    No chats found
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Chat Messages Area */}
+            <div className="flex-1 flex flex-col bg-black/50">
+              {selectedChatId ? (
+                <>
+                  <div className="p-4 border-b border-white/10 bg-black/50 flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                      <MessageSquare className="w-4 h-4 text-blue-400" />
+                      <span className="text-sm font-bold text-white">Chat {selectedChatId}</span>
+                    </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto custom-scrollbar p-6 flex flex-col gap-4">
+                    {loadingMessages ? (
+                      <div className="flex items-center justify-center h-full text-blue-400 text-[10px] uppercase tracking-widest">
+                        <RefreshCw className="w-4 h-4 animate-spin mr-2" /> Decrypting Messages...
+                      </div>
+                    ) : chatMessages.length > 0 ? (
+                      chatMessages.map((msg: any, i: number) => {
+                        const isVictim = msg.party?.toLowerCase() === 'victim' || msg.party?.toLowerCase() === 'client';
+                        return (
+                          <div 
+                            key={i} 
+                            className={cn(
+                              "max-w-[80%] rounded-2xl p-4 border",
+                              isVictim 
+                                ? "self-end bg-blue-600/10 border-blue-500/20 rounded-tr-sm" 
+                                : "self-start bg-zinc-800/50 border-white/10 rounded-tl-sm"
+                            )}
+                          >
+                            <div className="flex justify-between items-center mb-2 gap-4">
+                              <span className={cn(
+                                "text-[10px] font-black uppercase tracking-widest",
+                                isVictim ? "text-blue-400" : "text-red-400"
+                              )}>
+                                {msg.party || (isVictim ? 'Victim' : 'Operator')}
+                              </span>
+                              {msg.timestamp && (
+                                <span className="text-[9px] text-zinc-500 font-mono">{msg.timestamp}</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed">
+                              {msg.content?.replace(/^>\s*/gm, '') || msg.message}
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-zinc-500 text-xs">
+                        No messages available
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-zinc-500 gap-4">
+                  <MessageSquare className="w-12 h-12 opacity-20" />
+                  <span className="text-xs uppercase tracking-widest">Select a chat to view transcript</span>
+                </div>
+              )}
             </div>
           </motion.div>
         )}
@@ -1608,100 +1719,6 @@ function MapBackground() {
     </div>
   );
 }
-
-const MemoizedMarker = memo(({ marker, color, size, zoom, onMouseEnter, onMouseLeave, onClick }: any) => {
-  return (
-    <Marker 
-      coordinates={marker.coordinates}
-      onMouseEnter={() => onMouseEnter(marker)}
-      onMouseLeave={onMouseLeave}
-      onClick={(e) => onClick(marker, e)}
-    >
-      {/* "LIVE" Text for Top 2 */}
-      {marker.isTop2 && (
-        <motion.text
-          y={-size - 12}
-          textAnchor="middle"
-          style={{ fontSize: '10px', fontWeight: 'bold', fill: '#ef4444', letterSpacing: '0.1em' }}
-          initial={{ opacity: 0, y: -size }}
-          animate={{ opacity: 1, y: -size - 12 }}
-        >
-          LIVE
-        </motion.text>
-      )}
-
-      {/* Core Node */}
-      <motion.circle
-        r={size}
-        fill={color}
-        className="cursor-pointer"
-        style={{ 
-          stroke: 'rgba(255,255,255,0.3)',
-          strokeWidth: 0.8 / zoom
-        }}
-        initial={{ scale: 0, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0, opacity: 0 }}
-        whileHover={{ scale: 1.3 }}
-        transition={{ type: "spring", stiffness: 300, damping: 20 }}
-      />
-      
-      {/* Primary Pulse */}
-      <motion.circle
-        r={size}
-        fill="none"
-        stroke={color}
-        strokeWidth={1 / zoom}
-        animate={{ 
-          scale: [1, 3],
-          opacity: [0.6, 0]
-        }}
-        transition={{ 
-          duration: marker.isTop2 ? 1.5 : 2.5, 
-          repeat: Infinity,
-          ease: "easeOut"
-        }}
-      />
-
-      {/* Secondary Pulse (Delayed) */}
-      <motion.circle
-        r={size}
-        fill="none"
-        stroke={color}
-        strokeWidth={0.5 / zoom}
-        animate={{ 
-          scale: [1, 4.5],
-          opacity: [0.3, 0]
-        }}
-        transition={{ 
-          duration: marker.isTop2 ? 2 : 3.5, 
-          repeat: Infinity,
-          ease: "easeOut",
-          delay: 0.5
-        }}
-      />
-
-      {/* Top 2 Highlight Ring */}
-      {marker.isTop2 && (
-        <motion.circle
-          r={size * 1.5}
-          fill="none"
-          stroke={color}
-          strokeWidth={0.5 / zoom}
-          animate={{ 
-            opacity: [0.2, 0.6, 0.2],
-            scale: [1, 1.2, 1]
-          }}
-          transition={{ 
-            duration: 1, 
-            repeat: Infinity,
-            ease: "easeInOut"
-          }}
-        />
-      )}
-    </Marker>
-  );
-});
 
 function LandingPage({ onEnter, victims }: { onEnter: () => void, victims: Victim[] }) {
   const containerRef = useRef<HTMLDivElement>(null);

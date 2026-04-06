@@ -27,6 +27,7 @@ export default function TopBar({ currentView, onNavigate }: TopBarProps) {
   const handleLogout = () => {
     localStorage.removeItem('leakfeed_token');
     localStorage.removeItem('leakfeed_user');
+    window.dispatchEvent(new Event('auth-change'));
     setUser(null);
   };
 
@@ -43,7 +44,7 @@ export default function TopBar({ currentView, onNavigate }: TopBarProps) {
             <Activity className="w-4 h-4 text-white" />
           </div>
           <span className="text-white font-bold text-lg tracking-tight flex items-center">
-            LEAK<span className="text-blue-500">FEED</span>
+            LEAK<span className="text-blue-200">FEED</span>
           </span>
         </div>
 
