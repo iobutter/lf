@@ -30,15 +30,42 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
 
     // Simulate network delay for effect
     setTimeout(() => {
+      let validKey = false;
+      let tier = 'Premium';
+      
+      if (accessKey === 'O-85GR34FD234R6YU') {
+        validKey = true;
+        tier = 'Owner';
+      } else {
+        const storedKeysStr = localStorage.getItem('leakfeed_generated_keys');
+        if (storedKeysStr) {
+          try {
+            const keys: { key: string, tier: string, expiresAt: number }[] = JSON.parse(storedKeysStr);
+            const foundKey = keys.find(k => k.key === accessKey);
+            if (foundKey && foundKey.expiresAt > Date.now()) {
+              validKey = true;
+            }
+          } catch (e) {
+            console.error('Failed to parse keys', e);
+          }
+        }
+      }
+
+      if (!validKey) {
+         setError('Invalid or expired access key');
+         setLoading(false);
+         return;
+      }
+
       const randomName = `${ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]} ${NOUNS[Math.floor(Math.random() * NOUNS.length)]}`;
       const user = {
         id: `USR-${Math.floor(Math.random() * 1000000).toString().padStart(6, '0')}`,
         username: randomName,
-        tier: 'Premium',
+        tier: tier,
         key: accessKey
       };
 
-      localStorage.setItem('leakfeed_token', 'dummy-token-for-key');
+      localStorage.setItem('leakfeed_token', accessKey);
       localStorage.setItem('leakfeed_user', JSON.stringify(user));
       window.dispatchEvent(new Event('auth-change'));
       onSuccess(user);

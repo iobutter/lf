@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, User, Settings, Key, CreditCard, Shield, LogOut } from 'lucide-react';
+import { X, User, Settings, Key, CreditCard, Shield, LogOut, Copy, Clock, Plus, Trash } from 'lucide-react';
 
 interface AccountModalProps {
   isOpen: boolean;
@@ -10,9 +10,39 @@ interface AccountModalProps {
 }
 
 export default function AccountModal({ isOpen, onClose, user, onLogout }: AccountModalProps) {
-  const [activeTab, setActiveTab] = useState<'profile' | 'settings' | 'subscription'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'settings' | 'subscription' | 'admin'>('profile');
   const [apiKey, setApiKey] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(true);
+  const [generatedKeys, setGeneratedKeys] = useState<{ key: string, tier: string, expiresAt: number }[]>([]);
+  const [newKeyDuration, setNewKeyDuration] = useState<number>(1);
+
+  useEffect(() => {
+    const savedKeys = localStorage.getItem('leakfeed_generated_keys');
+    if (savedKeys) {
+      try {
+        setGeneratedKeys(JSON.parse(savedKeys));
+      } catch (e) {}
+    }
+  }, []);
+
+  const handleGenerateKey = () => {
+    const durationMs = newKeyDuration * 24 * 60 * 60 * 1000;
+    const key = `LK-${Math.random().toString(36).substring(2, 10).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    const newKey = {
+      key,
+      tier: 'Premium',
+      expiresAt: Date.now() + durationMs
+    };
+    const updatedKeys = [...generatedKeys, newKey];
+    setGeneratedKeys(updatedKeys);
+    localStorage.setItem('leakfeed_generated_keys', JSON.stringify(updatedKeys));
+  };
+
+  const handleRemoveKey = (keyToRemove: string) => {
+    const updatedKeys = generatedKeys.filter(k => k.key !== keyToRemove);
+    setGeneratedKeys(updatedKeys);
+    localStorage.setItem('leakfeed_generated_keys', JSON.stringify(updatedKeys));
+  };
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('leakfeed_theme');
@@ -89,6 +119,14 @@ export default function AccountModal({ isOpen, onClose, user, onLogout }: Accoun
                 icon={<CreditCard className="w-4 h-4" />} 
                 label="Subscription" 
               />
+              {user?.tier === 'Owner' && (
+                <TabButton 
+                  active={activeTab === 'admin'} 
+                  onClick={() => setActiveTab('admin')} 
+                  icon={<Shield className="w-4 h-4" />} 
+                  label="Admin Panel" 
+                />
+              )}
             </nav>
 
             <button 
@@ -225,6 +263,76 @@ export default function AccountModal({ isOpen, onClose, user, onLogout }: Accoun
                     </div>
                   </div>
                 )}
+              </motion.div>
+            )}
+
+            {activeTab === 'admin' && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-bold text-white mb-1">Admin Panel</h3>
+                  <p className="text-sm text-zinc-500">Generate access keys for other users.</p>
+                </div>
+                
+                <div className="p-5 bg-[#0a0a0a] border border-white/5 rounded-xl space-y-4">
+                  <h4 className="text-sm font-bold text-white">Generate New Key</h4>
+                  <div className="flex gap-2">
+                    <select
+                      value={newKeyDuration}
+                      onChange={(e) => setNewKeyDuration(Number(e.target.value))}
+                      className="bg-[#111] border border-white/10 rounded-xl px-4 text-sm text-white focus:outline-none"
+                    >
+                      <option value={1}>1 Day</option>
+                      <option value={7}>7 Days</option>
+                      <option value={30}>1 Month</option>
+                    </select>
+                    <button 
+                      onClick={handleGenerateKey}
+                      className="flex bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 text-sm font-bold rounded-xl transition-all items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" /> Generate
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-bold text-white mb-3">Active Keys</h4>
+                  <div className="space-y-3 max-h-[220px] overflow-y-auto pr-2 custom-scrollbar">
+                    {generatedKeys.length === 0 ? (
+                      <p className="text-xs text-zinc-500">No keys generated yet.</p>
+                    ) : (
+                      generatedKeys.map((key) => {
+                        const isExpired = Date.now() > key.expiresAt;
+                        return (
+                          <div key={key.key} className={`flex items-center justify-between p-3 rounded-xl border ${isExpired ? 'bg-red-500/5 border-red-500/10' : 'bg-[#0a0a0a] border-white/5'}`}>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-sm font-mono ${isExpired ? 'text-red-400 line-through opacity-70' : 'text-zinc-300'}`}>{key.key}</span>
+                                <button 
+                                  onClick={() => navigator.clipboard.writeText(key.key)}
+                                  className="text-zinc-500 hover:text-white"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Clock className="w-3.5 h-3.5 text-zinc-500" />
+                                <span className="text-xs text-zinc-500">
+                                  {isExpired ? 'Expired' : `Expires: ${new Date(key.expiresAt).toLocaleDateString()}`}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handleRemoveKey(key.key)}
+                              className="p-2 text-red-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                            >
+                              <Trash className="w-4 h-4" />
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
               </motion.div>
             )}
           </div>

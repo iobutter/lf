@@ -2,7 +2,13 @@ import { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react';
 import TopBar from './components/TopBar';
 import { GoogleGenAI } from "@google/genai";
 import Markdown from "react-markdown";
-import CobeGlobe from './components/CobeGlobe';
+import {
+  ComposableMap,
+  Geographies,
+  Geography,
+  Marker,
+  Sphere
+} from 'react-simple-maps';
 import { motion, AnimatePresence, useScroll, useTransform, useSpring } from 'motion/react';
 import { 
   AlertTriangle, 
@@ -146,6 +152,32 @@ export default function App() {
     }
   }, [timelineRange]);
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    isDragging.current = true;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isDragging.current) {
+      const dx = e.clientX - lastPos.current.x;
+      const dy = e.clientY - lastPos.current.y;
+      
+      const sensitivity = 0.25 / zoom;
+      
+      // Use requestAnimationFrame to throttle rotation updates
+      requestAnimationFrame(() => {
+        if (!isDragging.current) return;
+        setRotation(prev => [
+          prev[0] + dx * sensitivity,
+          prev[1] - dy * sensitivity,
+          prev[2]
+        ]);
+      });
+      lastPos.current = { x: e.clientX, y: e.clientY };
+    }
+    mousePosRef.current = { x: e.clientX, y: e.clientY };
+  };
+
   const fetchGroupIntel = async (groupName: string) => {
     if (!groupName || groupName === "Classified") return;
     setLoadingGroup(true);
@@ -164,6 +196,10 @@ export default function App() {
     } finally {
       setLoadingGroup(false);
     }
+  };
+
+  const handleMouseUp = () => {
+    isDragging.current = false;
   };
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -361,7 +397,22 @@ export default function App() {
     return sortedByDate.slice(0, 2).map(v => v.id || `${v.victim}-${v.date}`);
   }, [victims]);
 
-  const fetchGroupChats = async (groupName: string) => {
+  const markers = useMemo(() => {
+    if (!Array.isArray(victims) || victims.length === 0) return [];
+    
+    const countryCounts: Record<string, number> = {};
+    
+    // Sort victims by date to find the absolute newest ones
+    const sortedByDate = [...victims].sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return dateB - dateA;
+    });
+
+    const latestDateInData = sortedByDate.length > 0 ? new Date(sortedByDate[0].date).getTime() : Date.now();
+    const referenceDate = new Date(latestDateInData);
+
+    const fetchGroupChats = async (groupName: string) => {
     try {
       setLoadingChats(true);
       setSelectedChatGroup(groupName);
@@ -397,22 +448,7 @@ export default function App() {
     }
   };
 
-  const markers = useMemo(() => {
-    if (!Array.isArray(victims) || victims.length === 0) return [];
-    
-    const countryCounts: Record<string, number> = {};
-    
-    // Sort victims by date to find the absolute newest ones
-    const sortedByDate = [...victims].sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      return dateB - dateA;
-    });
-
-    const latestDateInData = sortedByDate.length > 0 ? new Date(sortedByDate[0].date).getTime() : Date.now();
-    const referenceDate = new Date(latestDateInData);
-
-    // Identify the top 2 most recent victims relative to the slider
+  // Identify the top 2 most recent victims relative to the slider
     const minTime = timelineRange.min;
     const maxTime = timelineRange.max;
     // sliderTime maps 0-100 to minTime -> maxTime
@@ -498,6 +534,48 @@ export default function App() {
     if (severity === 2) return finalSize * 0.85;
     return finalSize * 0.7;
   };
+
+  const memoizedGeographies = useMemo(() => (
+    <Geographies geography={geoUrl}>
+      {({ geographies }) =>
+        geographies.map((geo) => (
+          <Geography
+            key={geo.rsmKey}
+            geography={geo}
+            fill="#0a0a0a"
+            stroke="#1a1a1a"
+            strokeWidth={0.5}
+            style={{
+              default: { outline: "none" },
+              hover: { fill: "#111", outline: "none" },
+              pressed: { fill: "#1a1a1a", outline: "none" },
+            }}
+          />
+        ))
+      }
+    </Geographies>
+  ), []);
+
+  const handleMarkerMouseEnter = useCallback((marker: any) => {
+    setHoveredVictim(marker);
+  }, []);
+
+  const handleMarkerMouseLeave = useCallback(() => {
+    setHoveredVictim(null);
+  }, []);
+
+  const handleMarkerClick = useCallback((marker: any) => {
+    setSelectedVictim(marker);
+    setPopupPos({ 
+      x: Math.min(window.innerWidth - 380, Math.max(20, mousePosRef.current.x + 20)), 
+      y: Math.min(window.innerHeight - 450, Math.max(100, mousePosRef.current.y - 200)) 
+    });
+    const countryCode = (marker.country || '').toUpperCase();
+    const coords = COUNTRY_COORDINATES[countryCode];
+    if (coords) {
+      rotateTo(coords[0], coords[1], marker.date);
+    }
+  }, [rotateTo]);
 
   if (view === 'home') {
     return (
@@ -730,15 +808,47 @@ export default function App() {
 
       {/* Map Container */}
       <div 
-        className="w-full h-full relative z-10 overflow-hidden"
+        className="w-full h-full relative z-10 cursor-grab active:cursor-grabbing overflow-hidden"
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
       >
-        <CobeGlobe 
-          markers={markers} 
-          rotation={rotation} 
-          zoom={zoom} 
-          onRotationChange={setRotation} 
-        />
+        <ComposableMap
+          projection="geoOrthographic"
+          projectionConfig={{ 
+            scale: 280 * zoom,
+            rotate: rotation
+          }}
+          className="w-full h-full"
+        >
+          <Sphere fill="#080b14" stroke="#1a1a1a" strokeWidth={0.5} />
+          {memoizedGeographies}
+
+          <AnimatePresence>
+            {markers.map((marker: any) => {
+              // Check if marker is on the visible side of the globe
+              if (!isPointVisible(marker.coordinates[0], marker.coordinates[1], rotation)) return null;
+
+              const color = getSeverityColor(marker.severity, marker.isRecent, marker.isTop2);
+              const size = getSeveritySize(marker.severity, marker.isRecent, marker.isTop2);
+
+              return (
+                <MemoizedMarker 
+                  key={marker.id}
+                  marker={marker}
+                  color={color}
+                  size={size}
+                  zoom={zoom}
+                  onMouseEnter={handleMarkerMouseEnter}
+                  onMouseLeave={handleMarkerMouseLeave}
+                  onClick={handleMarkerClick}
+                />
+              );
+            })}
+          </AnimatePresence>
+        </ComposableMap>
       </div>
 
       {/* Latest Breaches Sidebar */}
@@ -1719,6 +1829,100 @@ function MapBackground() {
     </div>
   );
 }
+
+const MemoizedMarker = memo(({ marker, color, size, zoom, onMouseEnter, onMouseLeave, onClick }: any) => {
+  return (
+    <Marker 
+      coordinates={marker.coordinates}
+      onMouseEnter={() => onMouseEnter(marker)}
+      onMouseLeave={onMouseLeave}
+      onClick={(e) => onClick(marker, e)}
+    >
+      {/* "LIVE" Text for Top 2 */}
+      {marker.isTop2 && (
+        <motion.text
+          y={-size - 12}
+          textAnchor="middle"
+          style={{ fontSize: '10px', fontWeight: 'bold', fill: '#ef4444', letterSpacing: '0.1em' }}
+          initial={{ opacity: 0, y: -size }}
+          animate={{ opacity: 1, y: -size - 12 }}
+        >
+          LIVE
+        </motion.text>
+      )}
+
+      {/* Core Node */}
+      <motion.circle
+        r={size}
+        fill={color}
+        className="cursor-pointer"
+        style={{ 
+          stroke: 'rgba(255,255,255,0.3)',
+          strokeWidth: 0.8 / zoom
+        }}
+        initial={{ scale: 0, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0, opacity: 0 }}
+        whileHover={{ scale: 1.3 }}
+        transition={{ type: "spring", stiffness: 300, damping: 20 }}
+      />
+      
+      {/* Primary Pulse */}
+      <motion.circle
+        r={size}
+        fill="none"
+        stroke={color}
+        strokeWidth={1 / zoom}
+        animate={{ 
+          scale: [1, 3],
+          opacity: [0.6, 0]
+        }}
+        transition={{ 
+          duration: marker.isTop2 ? 1.5 : 2.5, 
+          repeat: Infinity,
+          ease: "easeOut"
+        }}
+      />
+
+      {/* Secondary Pulse (Delayed) */}
+      <motion.circle
+        r={size}
+        fill="none"
+        stroke={color}
+        strokeWidth={0.5 / zoom}
+        animate={{ 
+          scale: [1, 4.5],
+          opacity: [0.3, 0]
+        }}
+        transition={{ 
+          duration: marker.isTop2 ? 2 : 3.5, 
+          repeat: Infinity,
+          ease: "easeOut",
+          delay: 0.5
+        }}
+      />
+
+      {/* Top 2 Highlight Ring */}
+      {marker.isTop2 && (
+        <motion.circle
+          r={size * 1.5}
+          fill="none"
+          stroke={color}
+          strokeWidth={0.5 / zoom}
+          animate={{ 
+            opacity: [0.2, 0.6, 0.2],
+            scale: [1, 1.2, 1]
+          }}
+          transition={{ 
+            duration: 1, 
+            repeat: Infinity,
+            ease: "easeInOut"
+          }}
+        />
+      )}
+    </Marker>
+  );
+});
 
 function LandingPage({ onEnter, victims }: { onEnter: () => void, victims: Victim[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
