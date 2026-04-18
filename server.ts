@@ -4,6 +4,7 @@ import axios from "axios";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { GoogleGenAI } from "@google/genai";
 import { initDb, getDb, saveDb } from "./db";
 
 dotenv.config();
@@ -52,7 +53,7 @@ async function startServer() {
   // API Proxy for Ransomware.live
   app.get("/api/victims/recent", async (req, res) => {
     try {
-      const apiKey = process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72";
+      const apiKey = (process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72").trim();
       
       const response = await axios.get("https://api-pro.ransomware.live/victims/recent", {
         params: {
@@ -76,7 +77,7 @@ async function startServer() {
 
   app.get("/api/group/:groupname", async (req, res) => {
     try {
-      const apiKey = process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72";
+      const apiKey = (process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72").trim();
       const { groupname } = req.params;
       
       // Sanitize groupname to prevent potential SSRF or path traversal
@@ -104,7 +105,7 @@ async function startServer() {
 
   app.get("/api/negotiations", async (req, res) => {
     try {
-      const apiKey = process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72";
+      const apiKey = (process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72").trim();
       
       const response = await axios.get("https://api-pro.ransomware.live/negotiations", {
         headers: {
@@ -125,7 +126,7 @@ async function startServer() {
 
   app.get("/api/negotiations/:group", async (req, res) => {
     try {
-      const apiKey = process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72";
+      const apiKey = (process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72").trim();
       const { group } = req.params;
       
       const response = await axios.get(`https://api-pro.ransomware.live/negotiations/${group}`, {
@@ -147,7 +148,7 @@ async function startServer() {
 
   app.get("/api/negotiations/:group/:id", async (req, res) => {
     try {
-      const apiKey = process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72";
+      const apiKey = (process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72").trim();
       const { group, id } = req.params;
       
       const response = await axios.get(`https://api-pro.ransomware.live/negotiations/${group}/${id}`, {
@@ -170,7 +171,7 @@ async function startServer() {
   // Global Stats Proxy
   app.get("/api/stats", async (req, res) => {
     try {
-      const apiKey = process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72";
+      const apiKey = (process.env.RANSOMWARE_API_KEY || "a72505f5-af2c-4b8b-95be-b28674f7ef72").trim();
       const response = await axios.get("https://api-pro.ransomware.live/stats", {
         headers: {
           "X-API-KEY": apiKey,
@@ -182,6 +183,49 @@ async function startServer() {
     } catch (error: any) {
       console.error("Stats fetch error:", error.message);
       res.status(error.response?.status || 500).json({ error: "Stats unavailable" });
+    }
+  });
+
+  // AI Analyze Breach Proxy
+  app.post("/api/analyze-breach", async (req, res) => {
+    try {
+      const { companyName } = req.body;
+      if (!companyName) {
+        return res.status(400).json({ error: "Company name is required" });
+      }
+      
+      const apiKey = process.env.GEMINI_API_KEY?.trim();
+      if (!apiKey) {
+        return res.status(500).json({ error: "API configuration error (Missing Gemini Key)" });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `Find recent news and fact-check the data breach involving ${companyName}. Provide exactly 2-3 short bullet points of known facts. Keep it very concise. No more than 50 words total. Format as Markdown bullet points.`;
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-3.1-flash",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }],
+        },
+      });
+      
+      let content = response.text || "No known facts found.";
+      
+      const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+      if (chunks && chunks.length > 0) {
+        content += "\n\n**Sources:**\n";
+        chunks.forEach((chunk: any) => {
+          if (chunk.web?.uri && chunk.web?.title) {
+            content += `- [${chunk.web.title}](${chunk.web.uri})\n`;
+          }
+        });
+      }
+      
+      res.json({ content });
+    } catch (error: any) {
+      console.error("Analyze breach error:", error.message);
+      res.status(500).json({ error: "Failed to analyze breach" });
     }
   });
 

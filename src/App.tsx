@@ -332,41 +332,35 @@ export default function App() {
     setIsFetchingNews(true);
     setNewsContent('');
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        setNewsContent("Error: Gemini API key is missing.");
+      const companyName = victim.victim || victim.company;
+      
+      const response = await fetch('/api/analyze-breach', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ companyName })
+      });
+      
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const textStr = await response.text();
+        console.error("Non-JSON Response from /api/analyze-breach:", textStr);
+        throw new Error(`Server returned non-JSON response (${response.status})`);
+      }
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        setNewsContent(`Error: ${data.error || 'Failed to fetch facts'}`);
         setIsFetchingNews(false);
         return;
       }
-      const ai = new GoogleGenAI({ apiKey });
-      const companyName = victim.victim || victim.company;
-      const prompt = `Find recent news and fact-check the data breach involving ${companyName}. Provide exactly 2-3 short bullet points of known facts. Keep it very concise. No more than 50 words total. Format as Markdown bullet points.`;
       
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-        },
-      });
-      
-      let content = response.text || "No known facts found.";
-      
-      // Append grounding chunks (URLs) if available
-      const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-      if (chunks && chunks.length > 0) {
-        content += "\n\n**Sources:**\n";
-        chunks.forEach((chunk: any) => {
-          if (chunk.web?.uri && chunk.web?.title) {
-            content += `- [${chunk.web.title}](${chunk.web.uri})\n`;
-          }
-        });
-      }
-      
-      setNewsContent(content);
-    } catch (error) {
+      setNewsContent(data.content || "No known facts found.");
+    } catch (error: any) {
       console.error("Failed to fetch facts:", error);
-      setNewsContent("Failed to fetch facts. Please try again later.");
+      setNewsContent(`Failed to fetch facts: ${error.message || 'Please try again later'}`);
     } finally {
       setIsFetchingNews(false);
     }
